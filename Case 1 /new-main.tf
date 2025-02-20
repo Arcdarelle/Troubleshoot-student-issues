@@ -5,7 +5,7 @@ provider "aws" {
 
 # Create a docker-lab VPC
 resource "aws_vpc" "docker-lab_vpc" {
-  cidr_block = "192.168.2.0/16"
+  cidr_block = "192.168.0.0/16"
 
   tags = {
     Name = "docker-lab-vpc"
@@ -15,7 +15,7 @@ resource "aws_vpc" "docker-lab_vpc" {
 # Create a public subnet
 resource "aws_subnet" "public_subnet" {
   vpc_id                  = aws_vpc.docker-lab_vpc.id
-  cidr_block              = "192.168.2.0/24"
+  cidr_block              = "192.168.1.0/24"
   map_public_ip_on_launch = true
   availability_zone       = "us-east-1a"
 
