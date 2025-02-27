@@ -1,3 +1,16 @@
+# configured aws provider with proper credentials
+provider "aws" {
+  region = var.region
+}
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0.0"
+    }
+  }
+}
 
 # Create a VPC
 
@@ -60,115 +73,36 @@ resource "aws_subnet" "public_subnet" {
   }
 }
 
-#data for amazon linux
+# use data source to get a registered amazon linux 2 ami
+data "aws_ssm_parameter" "ami_id" {
+  name = "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+}
 
-data "aws_ami" "amazon-2" {
-    most_recent = true
-  
-    filter {
-      name = "name"
-      values = ["amzn2-ami-hvm-*-x86_64-ebs"]
-    }
-    owners = ["amazon"]
-  }
- 
-#create ec2 instances 
 
-module "ec2_instance" {
-  source  = "terraform-aws-modules/ec2-instance/aws"
-  version = ">= 3.0"
-  
-  for_each = {
-    "master"    = { instance_type = "t3.micro", name = "master-instance", user_data = local.install_script },
-    "node1"     = { instance_type = "t3.micro", name = "node1-instance" , user_data = local.install_script },
-    "node2"     = { instance_type = "t3.small", name = "node2-instance" , user_data = local.install_script }
-  }
-
-  name                   = "${each.value.name}"
-  ami                    = "${data.aws_ami.amazon-2.id}"
-  instance_type          = "${each.value.instance_type}"
-  key_name               = aws_key_pair.ec2_key.key_name
-  monitoring             = true
-  user_data              = "${each.value.user_data}"
+resource "aws_instance" "ec2_instance" {
+  ami                    = data.aws_ssm_parameter.ami_id.value
+  instance_type          = var.typeinstances
   subnet_id              = aws_subnet.public_subnet.id
-  vpc_security_group_ids = ["${aws_security_group.web-sg.id}"]
-  
+  vpc_security_group_ids = [aws_security_group.webserver_security_group.id]
+  key_name               = aws_key_pair.webserver_key.key_name
+
+  # connection to the server using ssh and ec2-user
+  connection {
+    type        = "ssh"
+    user        = "ec2-user"
+    private_key = file(local_file.ssh_key.filename)
+    host        = aws_instance.ec2_instance.public_ip
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo yum -y install httpd && sudo systemctl start httpd",
+      "echo '<h1>My Test Website using Terraform Provisioner</h1>' > index.html",
+      "sudo mv index.html /var/www/html/"
+    ]
+  }
 
   tags = {
-    Terraform   = "true"
-    Environment = "${ var.environment }"
+    Name = "Webserver httpd"
   }
-}
-# here we are using the Null resource to copy our ssh key into the master server.
-resource "null_resource" "InitMaster" {
-    depends_on = [module.ec2_instance["master"]]
-
-   
-
- provisioner "local-exec" {
-    command = "sleep 300"
-  }
-
-
-    connection {
-      type = "ssh"
-      user = "ec2-user"
-      private_key = tls_private_key.ec2_key.private_key_pem
-      host = module.ec2_instance["master"].public_ip
-    }
-
-    
-    provisioner "remote-exec" {
-    inline = [
-      "output=$(docker swarm init --advertise-addr ${module.ec2_instance["master"].private_ip} 2>&1)",
-      "echo $output > init_output.txt",
-      "export join_command=$(grep -oP '(?<=docker swarm join --token )[^ ]+' init_output.txt)",
-      "echo 'docker swarm join --token' $join_command ${module.ec2_instance["master"].private_ip}':2377' > init_output.txt"
-    ]
-  }
-   provisioner "local-exec" {
-    command = <<-EOT
-    scp -o StrictHostKeyChecking=no -i ${local_file.ssh_key.filename} ec2-user@${module.ec2_instance["master"].public_ip}:~/init_output.txt ./ 
-    EOT
-  }
-
- 
-}
-
-#Node 1 Joins the swarm 
-
-resource "null_resource" "JoinSwarm" {
-  for_each = {
-    for idx, instance in module.ec2_instance : idx =>
-    instance
-    if idx != "master"
-  }
-
-  
-    depends_on = [null_resource.InitMaster]
-
-
-    connection {
-      type = "ssh"
-      user = "ec2-user"
-      private_key = tls_private_key.ec2_key.private_key_pem
-      host = module.ec2_instance[each.key].public_ip
-    }
-
-    provisioner "local-exec" {
-    command = <<-EOT
-    scp -o StrictHostKeyChecking=no -i ${local_file.ssh_key.filename} init_output.txt  ec2-user@${module.ec2_instance[each.key].public_ip}:~/ 
-    EOT
-  }
-
-
-     provisioner "remote-exec" {
-    inline = [
-      "join_command=$(cat init_output.txt)",
-      "$join_command"
-    ]
-    }
-
-
- 
 }

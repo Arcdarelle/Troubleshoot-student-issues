@@ -1,19 +1,15 @@
 
-locals {
-  install_script = file("${path.module}/install.sh")
-}
-
-
-variable "environment" {
-    type = string
-    default = "dev"
-  
-}
-
 variable "region" {
   type = string
   default = "us-east-2"
 }
+
+variable "typeinstances" {
+  type        = string
+  default     = "t2.micro"
+  description = "type of the instances"
+}
+
 
 variable "VPC_cidr" {
   type = string
@@ -32,5 +28,5 @@ variable "AZ" {
 
 variable "project-name" {
   type    = string
-  default = "Docker-swarm"
+  default = "docker-lab"
 }
